@@ -1,4 +1,4 @@
-// Spočítá kusy skladem (skladem + rezervováno) pro lištu na fajnspanek.cz
+// Spočítá kusy skutečně skladem pro lištu na fajnspanek.cz
 // a uloží je do sklad.json. Spouští GitHub Actions jednou denně.
 import { writeFileSync } from "node:fs";
 
@@ -6,13 +6,42 @@ const TOKEN = process.env.SHOPTET_TOKEN;
 if (!TOKEN) throw new Error("Chybí SHOPTET_TOKEN");
 
 // Pořadí = pořadí na liště. Produkt patří do první kategorie, kde je započtený.
+// guids = hlavní kategorie + podkategorie výprodeje (toppery, OUTLET…).
 // navic = kusy vystavené na prodejně, které nejsou vedené ve skladu.
 const CATS = [
-  { guid: "352a7ee4-ed2a-11e9-ac23-ac1f6b0076ec", tvary: ["matrace", "matrace", "matrací"], navic: 21 },
-  { guid: "a406fa38-ed2b-11e9-ac23-ac1f6b0076ec", tvary: ["rošt", "rošty", "roštů"], navic: 21 },
-  { guid: "5d9a7cbb-eebd-11e9-ac23-ac1f6b0076ec", tvary: ["postel", "postele", "postelí"], navic: 11, vyradit: /stolek|komod/i },
-  { guid: "23d876dc-eebe-11e9-ac23-ac1f6b0076ec", tvary: ["polštář", "polštáře", "polštářů"], vyradit: /klínov|podhlavník|kolen|podsedák|cestovn|travel|\bset\b/i },
-  { guid: "42e20358-0224-11ea-beb1-002590dad85e", tvary: ["přikrývka", "přikrývky", "přikrývek"] },
+  {
+    guids: [
+      "352a7ee4-ed2a-11e9-ac23-ac1f6b0076ec", // Matrace
+      "24b20c8f-5312-11ee-b534-2a01067a25a9", // Výprodej: matrace
+      "62e34443-6133-11ee-ba39-2a01067a25a9", // Výprodej: přistýlkové matrace - toppery
+      "bf9ac915-1130-11f0-9bb2-2a4ce61e76aa", // Výprodej: matrace OUTLET
+    ],
+    tvary: ["matrace", "matrace", "matrací"],
+    navic: 21,
+  },
+  {
+    guids: [
+      "a406fa38-ed2b-11e9-ac23-ac1f6b0076ec", // Rošty
+      "d7a751e8-7c12-11ef-a91e-226f2012f461", // Výprodej: rošty
+    ],
+    tvary: ["rošt", "rošty", "roštů"],
+    navic: 21,
+  },
+  {
+    guids: [
+      "5d9a7cbb-eebd-11e9-ac23-ac1f6b0076ec", // Postele
+      "b0022ffd-cb93-11f0-babe-2a4ce61e76aa", // Výprodej: postele
+    ],
+    tvary: ["postel", "postele", "postelí"],
+    navic: 11,
+    vyradit: /stolek|komod/i,
+  },
+  {
+    guids: ["23d876dc-eebe-11e9-ac23-ac1f6b0076ec"],
+    tvary: ["polštář", "polštáře", "polštářů"],
+    vyradit: /klínov|podhlavník|kolen|podsedák|cestovn|travel|\bset\b/i,
+  },
+  { guids: ["42e20358-0224-11ea-beb1-002590dad85e"], tvary: ["přikrývka", "přikrývky", "přikrývek"] },
 ];
 // Doplňky se nepočítají v žádné kategorii.
 const DOPLNKY = /potah|chránič|náhradní|lamel|taška|poukaz/i;
@@ -37,11 +66,12 @@ async function vse(path, key) {
   }
 }
 
-// Kusy na produkt: kladný stav + rezervace, přes všechny varianty a sklady.
+// Kusy na produkt: jen kladný stav skladu (bez rezervací a prodaných do mínusu),
+// přes všechny varianty a sklady.
 const kusy = new Map();
 for (const { id } of (await api("/stocks")).stocks) {
   for (const s of await vse(`/stocks/${id}/supplies`, "supplies")) {
-    const n = Math.max(+s.amount || 0, 0) + Math.max(+s.claim || 0, 0);
+    const n = Math.max(+s.amount || 0, 0);
     kusy.set(s.productGuid, (kusy.get(s.productGuid) || 0) + n);
   }
 }
@@ -52,7 +82,9 @@ const v = [];
 for (const c of CATS) {
   let soucet = 0;
   const vyrazeno = [];
-  for (const p of await vse(`/products?categoryGuid=${c.guid}`, "products")) {
+  const produkty = [];
+  for (const g of c.guids) produkty.push(...(await vse(`/products?categoryGuid=${g}`, "products")));
+  for (const p of produkty) {
     if (hotovo.has(p.guid)) continue;
     const n = kusy.get(p.guid) || 0;
     if (p.type !== "product" || DOPLNKY.test(p.name) || c.vyradit?.test(p.name)) {
