@@ -1,0 +1,24 @@
+name: Lista skladem
+on:
+  schedule:
+    - cron: "0 1 * * *" # 3:00 letního / 2:00 zimního času
+  workflow_dispatch: # ruční spuštění tlačítkem "Run workflow"
+permissions:
+  contents: write
+jobs:
+  sklad:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node sklad.mjs
+        env:
+          SHOPTET_TOKEN: ${{ secrets.SHOPTET_TOKEN }}
+      - run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add sklad.json
+          git diff --cached --quiet || git commit -m "Stav skladu $(date +%F)"
+          git push
